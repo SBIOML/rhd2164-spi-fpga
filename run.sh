@@ -1,0 +1,1 @@
+cd sim;make SIM=verilator; cd ..
