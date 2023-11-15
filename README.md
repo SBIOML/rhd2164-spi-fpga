@@ -40,7 +40,11 @@ You should now be ready to develop (you should still follow the [development set
 
 ### Vitis
 
+Vitis is used to create the Processing System-side application, which may or may not communicate with the PL.
+
 To use Vitis, just follow any well-made Vitis tutorial, such as [Digilent's](https://digilent.com/reference/programmable-logic/guides/getting-started-with-ipi).
+
+Some more varied and advanced Vitis tutorials are available on Xilinx's [Vitis-Tutorials repo](https://github.com/Xilinx/Vitis-Tutorials).
 
 A working barebones demo is located at `vitis/main.c`, which simply sends SPI packets. The payload starts at `0x0000` and increments by 1 after every packet.
 
