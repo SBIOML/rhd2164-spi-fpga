@@ -125,7 +125,7 @@ module spi_master_cs #(
           // Sample MISOB on rising edge
           o_dout_a <= r_dout_a;
           o_dout_b <= {r_dout_b[15:1], i_miso};
-        end else begin
+        end else if (r_CS_Inactive_Count == 0) begin
           r_SM_CS <= IDLE;
         end
       end
