@@ -32,7 +32,6 @@
 `timescale 1us/1ns
 
 module spi_master #(
-  parameter SPI_MODE = 0,
   parameter CLKS_PER_HALF_BIT = 4
 ) (
   // Control/Data Signals,
@@ -45,8 +44,8 @@ module spi_master #(
   output reg   o_done,   // Transmit Ready for next byte
 
   // RX (MISO) Signals
-  output reg [15:0] o_dout,    // Byte received on MISO
-  output reg        o_rx_done, // Data Valid pulse (1 clock cycle)
+  output [15:0] o_dout_a,    // Byte received on MISOA
+  output [15:0] o_dout_b,    // Byte received on MISOB
 
   // SPI Interface
   output reg o_sclk,
@@ -54,64 +53,57 @@ module spi_master #(
   output reg o_mosi
 );
 
-  // SPI Interface (All Runs at SPI Clock Domain)
-  wire w_CPOL;     // Clock polarity
-  wire w_CPHA;     // Clock phase
-
   reg [$clog2(CLKS_PER_HALF_BIT*2)-1:0] r_SPI_Clk_Count;
-  reg r_SPI_Clk;
-  reg [5:0] r_SPI_Clk_Edges;
+  reg r_sclk;
+  reg [5:0] r_SPI_Clk_Edges; // 32d
   reg r_Leading_Edge;
   reg r_Trailing_Edge;
-  reg       r_TX_DV;
+  reg        r_TX_DV;
   reg [15:0] r_TX_Byte;
 
-  reg [3:0] r_RX_Bit_Count; // 16d counter
-  reg [3:0] r_TX_Bit_Count;
+  reg r_dout_sel;
 
-  // CPOL: Clock Polarity
-  // CPOL=0 means clock idles at 0, leading edge is rising edge.
-  // CPOL=1 means clock idles at 1, leading edge is falling edge.
-  assign w_CPOL  = (SPI_MODE == 2) | (SPI_MODE == 3);
+  reg [3:0] r_tx_cnt;
 
-  // CPHA: Clock Phase
-  // CPHA=0 means the "out" side changes the data on trailing edge of clock
-  //              the "in" side captures data on leading edge of clock
-  // CPHA=1 means the "out" side changes the data on leading edge of clock
-  //              the "in" side captures data on the trailing edge of clock
-  assign w_CPHA  = (SPI_MODE == 1) | (SPI_MODE == 3);
+  reg [15:0] r_rx; // Mode 0 sampler
+  reg [3:0] r_rx_cnt; // 16d counter
+
+  reg [15:0] r_rx_a; // DDR sampler ch A
+  reg [15:0] r_rx_b; // DDR sampler ch B
+  reg [3:0] r_ddr_rx_cnt_a; // 16d counter
+  reg [4:0] r_ddr_rx_cnt_b; // Need to sample it 1 extra time
 
 
   // SCLK Generator
   always @(posedge i_clk or negedge i_rst) begin
     if (~i_rst) begin
-      o_done      <= 1'b0;
+      o_done <= 1'b0;
       r_SPI_Clk_Edges <= 0;
       r_Leading_Edge  <= 1'b0;
       r_Trailing_Edge <= 1'b0;
-      r_SPI_Clk       <= w_CPOL; // assign default state to idle state
+      r_sclk <= 0; // assign default state to idle state
       r_SPI_Clk_Count <= 0;
     end else begin
-      // Default assignments
       r_Leading_Edge  <= 1'b0;
       r_Trailing_Edge <= 1'b0;
       
       if (i_start) begin
         o_done <= 1'b0;
-        r_SPI_Clk_Edges <= 6'd32;  // Total # edges in one byte ALWAYS 16, but we send 2 kek
+        r_SPI_Clk_Edges <= 6'd32;  // # edges in one byte = 16, but we send 2 kek
       end else if (r_SPI_Clk_Edges > 0) begin
         o_done <= 1'b0;
-        
         if (r_SPI_Clk_Count == CLKS_PER_HALF_BIT*2-1) begin
+          // time = full-bit, falling edge sclk + shift
           r_SPI_Clk_Edges <= r_SPI_Clk_Edges - 1'b1;
           r_Trailing_Edge <= 1'b1;
           r_SPI_Clk_Count <= 0;
-          r_SPI_Clk       <= ~r_SPI_Clk;
+          r_sclk <= 0;
         end else if (r_SPI_Clk_Count == CLKS_PER_HALF_BIT-1) begin
+          // time = half-bit, rising edge sclk + sampling
           r_SPI_Clk_Edges <= r_SPI_Clk_Edges - 1'b1;
           r_Leading_Edge  <= 1'b1;
           r_SPI_Clk_Count <= r_SPI_Clk_Count + 1'b1;
-          r_SPI_Clk       <= ~r_SPI_Clk;
+          r_sclk <= 1'b1;
         end else begin
           r_SPI_Clk_Count <= r_SPI_Clk_Count + 1'b1;
         end
@@ -122,70 +114,102 @@ module spi_master #(
   end // always @ (posedge i_clk or negedge i_rst)
 
 
-  // Purpose: Register i_din when Data Valid is pulsed.
+  // Purpose: Register i_din when Data Valid is pulsed and set dout MUX
   // Keeps local storage of byte in case higher level module changes the data
   always @(posedge i_clk or negedge i_rst) begin
     if (~i_rst) begin
       r_TX_Byte <= 16'd0;
       r_TX_DV   <= 1'b0;
+      r_dout_sel <= 0; // Mode0
     end else begin
       r_TX_DV <= i_start; // 1 clock cycle delay
       if (i_start) begin
         r_TX_Byte <= i_din;
+        r_dout_sel <= i_din[15:14] == 2'b0 ? 1'b1 : 1'b0;
       end
     end // else: !if(~i_rst)
   end // always @ (posedge i_clk or negedge i_rst)
+
 
   // Purpose: Generate MOSI data
   // Works with both CPHA=0 and CPHA=1
   always @(posedge i_clk or negedge i_rst) begin
     if (~i_rst) begin
       o_mosi <= 1'b0;
-      r_TX_Bit_Count <= 4'd15;
+      r_tx_cnt <= 4'd15;
     end else begin
-      // If ready is high, reset bit counts to default
       if (o_done) begin
-        r_TX_Bit_Count <= 4'd15;
-      end else if (r_TX_DV & ~w_CPHA) begin // CPHA = 0 first bit (shift before first sclk edge)
+        r_tx_cnt <= 4'd15;
+      end else if (r_TX_DV) begin 
+        // CPHA = 0 first bit (shift before first sclk edge)
         o_mosi <= r_TX_Byte[4'd15];
-        r_TX_Bit_Count <= 4'd14;
-      end else if ((r_Leading_Edge & w_CPHA) | (r_Trailing_Edge & ~w_CPHA)) begin
-        r_TX_Bit_Count <= r_TX_Bit_Count - 1'b1;
-        o_mosi <= r_TX_Byte[r_TX_Bit_Count];
+        r_tx_cnt <= 4'd14;
+      end else if (r_Trailing_Edge) begin
+        o_mosi <= r_TX_Byte[r_tx_cnt];
+        r_tx_cnt <= r_tx_cnt - 1'b1;
       end
     end
   end
 
 
-  // Purpose: Read in MISO data.
+  // Read MISO in normal mode
   always @(posedge i_clk or negedge i_rst) begin
     if (~i_rst) begin
-      o_dout <= 16'd0;
-      o_rx_done <= 1'b0;
-      r_RX_Bit_Count <= 4'd15;
+      r_rx <= 16'd0;
+      r_rx_cnt <= 4'd15;
     end else begin
       // Default Assignments
-      o_rx_done   <= 1'b0;
-
-      if (o_done)  begin // Check if ready is high, if so reset bit count to default
-        r_RX_Bit_Count <= 4'd15;
-      end else if ((r_Leading_Edge & ~w_CPHA) | (r_Trailing_Edge & w_CPHA)) begin
-        o_dout[r_RX_Bit_Count] <= i_miso;  // Sample data
-        r_RX_Bit_Count <= r_RX_Bit_Count - 1'b1;
-        if (r_RX_Bit_Count == 4'd0) begin
-          o_rx_done <= 1'b1;   // Byte done, pulse Data Valid
+      if (o_done) begin // Check if ready is high, if so reset bit count to default
+        r_rx_cnt <= 4'd15;
+      end else if (r_Leading_Edge) begin
+        r_rx[r_rx_cnt] <= i_miso;  // Sample data
+        r_rx_cnt <= r_rx_cnt - 1'b1;
+      end
+    end
+  end
+  
+  
+  // Read MISO in DDR mode
+  always @(posedge i_clk or negedge i_rst) begin
+    if (~i_rst) begin
+      r_rx_a <= 0;
+      r_rx_b <= 0;
+      r_ddr_rx_cnt_a <= 4'd15;
+      r_ddr_rx_cnt_b <= 5'd16;
+    end else begin
+      // Default Assignments
+      if (o_done) begin // Check if ready is high, if so reset bit count to default
+        r_ddr_rx_cnt_a <= 4'd15;
+        r_ddr_rx_cnt_b <= 5'd16;
+      end else begin
+        if (r_Leading_Edge) begin
+          // rising edge == miso B
+          r_ddr_rx_cnt_b <= r_ddr_rx_cnt_b - 1'b1;
+          if (r_ddr_rx_cnt_b == 5'd16) begin
+            // skip first rising edge
+          end else begin
+            r_rx_b[r_ddr_rx_cnt_b] <= i_miso;  // Sample data
+          end
+        end else if (r_Trailing_Edge) begin
+          // falling edge == miso A
+          r_rx_a[r_ddr_rx_cnt_a] <= i_miso;  // Sample data
+          r_ddr_rx_cnt_a <= r_ddr_rx_cnt_a - 1'b1;
         end
       end
     end
   end
-  
+
   // Purpose: Add clock delay to signals for alignment.
   always @(posedge i_clk or negedge i_rst) begin
     if (~i_rst) begin
-      o_sclk  <= w_CPOL;
+      o_sclk  <= 0;
     end else begin
-      o_sclk <= r_SPI_Clk;
+      o_sclk <= r_sclk;
     end // else: !if(~i_rst)
   end // always @ (posedge i_clk or negedge i_rst)
   
+  // Output Mux
+  assign o_dout_a = r_dout_sel == 0 ? r_rx : r_rx_a;
+  assign o_dout_b = r_dout_sel == 0 ? 16'b0 : r_rx_b;
+
 endmodule // SPI_Master

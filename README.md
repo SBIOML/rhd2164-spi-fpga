@@ -52,6 +52,8 @@ A working barebones demo is located at `vitis/main.c`, which simply sends SPI pa
 
 ## References
 
+- SPI [tutorial](https://www.analog.com/en/analog-dialogue/articles/introduction-to-spi-interface.html)
+- RHD2164 [datasheet](https://intantech.com/files/Intan_RHD2164_datasheet.pdf)
 - Verilog [tutorial](https://www.chipverify.com/tutorials/verilog)
 - [Verilator](https://verilator.org/guide/latest/index.html), a Verilog/SystemVerilog compiler to C++/SystemC
 - [cocotb](https://docs.cocotb.org/en/stable/index.html), a python library to build SystemVerilog and Verilog testbenches

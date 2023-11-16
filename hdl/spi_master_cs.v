@@ -33,13 +33,12 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 module spi_master_cs #(
-  parameter SPI_MODE = 0,
   parameter CLKS_PER_HALF_BIT = 4,
-  parameter CS_INACTIVE_CLKS = 4
+  parameter CS_INACTIVE_CLKS = 20 // min 154 ns
 ) (
   // Control/Data Signals,
-  input        i_rst,     // FPGA Reset
-  input        i_clk,     // FPGA Clock
+  input i_rst,     // FPGA Reset
+  input i_clk,     // FPGA Clock
 
   // TX (MOSI) Signals
   input [15:0]  i_din,    // Byte to transmit on MOSI
@@ -47,8 +46,8 @@ module spi_master_cs #(
   output        o_done,    // Transmit Ready for next byte
 
   // RX (MISO) Signals
-  output        o_rx_done, // Data Valid pulse (1 clock cycle)
-  output [15:0] o_dout,   // Byte received on MISO A
+  output reg [15:0] o_dout_a,   // Byte received on MISO A
+  output reg [15:0] o_dout_b,   // Byte received on MISO B
 
   // SPI Interface
   output o_sclk,
@@ -61,6 +60,9 @@ module spi_master_cs #(
   localparam TRANSFER    = 2'b01;
   localparam CS_INACTIVE = 2'b10;
 
+  reg [15:0] r_dout_a;
+  reg [15:0] r_dout_b;
+
   reg [1:0] r_SM_CS;
   reg r_CS_n;
   reg [$clog2(CS_INACTIVE_CLKS):0] r_CS_Inactive_Count;
@@ -68,12 +70,11 @@ module spi_master_cs #(
 
   // Instantiate Master
   spi_master #(
-    .SPI_MODE(SPI_MODE),
     .CLKS_PER_HALF_BIT(CLKS_PER_HALF_BIT)
   ) spi_master_inst (
     // Control/Data Signals,
     .i_rst(i_rst), // FPGA Reset
-    .i_clk(i_clk),   // FPGA Clock
+    .i_clk(i_clk), // FPGA Clock
 
     // TX (MOSI) Signals
     .i_din(i_din),          // Byte to transmit
@@ -81,8 +82,8 @@ module spi_master_cs #(
     .o_done(w_Master_Ready),// Transmit Ready for Byte
 
     // RX (MISO) Signals
-    .o_rx_done(o_rx_done),  // Data Valid pulse (1 clock cycle)
-    .o_dout(o_dout),        // Byte received on MISO
+    .o_dout_a(r_dout_a), // Byte received on MISO
+    .o_dout_b(r_dout_b),
 
     // SPI Interface
     .o_sclk(o_sclk),
@@ -117,8 +118,11 @@ module spi_master_cs #(
 
       CS_INACTIVE:
       begin
-        if (r_CS_Inactive_Count > 0) begin
-          r_CS_Inactive_Count <= r_CS_Inactive_Count - 1'b1;
+        r_CS_Inactive_Count <= r_CS_Inactive_Count - 1'b1;
+        if (r_CS_Inactive_Count == CS_INACTIVE_CLKS) begin
+          // Sample MISOB on rising edge
+          o_dout_a <= r_dout_a;
+          o_dout_b <= {r_dout_b[15:1], i_miso};
         end else begin
           r_SM_CS <= IDLE;
         end
@@ -134,8 +138,6 @@ module spi_master_cs #(
   end // always @ (posedge i_clk or negedge i_rst)
 
   assign o_cs = r_CS_n;
-
-  //assign o_done  = ((r_SM_CS == IDLE) | (r_SM_CS == TRANSFER && w_Master_Ready == 1'b1)) & ~i_start;
   assign o_done  = (r_SM_CS == IDLE) & ~i_start;
 
 endmodule // SPI_Master_With_Single_CS
