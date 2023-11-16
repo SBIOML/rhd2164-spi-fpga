@@ -1,1 +1,1 @@
-cd sim;make SIM=verilator; cd ..
+cd sim;make SIM=icarus WAVES=1; cd ..

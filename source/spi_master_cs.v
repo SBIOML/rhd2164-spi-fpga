@@ -35,7 +35,7 @@
 module spi_master_cs #(
   parameter SPI_MODE = 0,
   parameter CLKS_PER_HALF_BIT = 4,
-  parameter CS_INACTIVE_CLKS = 2
+  parameter CS_INACTIVE_CLKS = 4
 ) (
   // Control/Data Signals,
   input        i_rst,     // FPGA Reset
@@ -90,51 +90,39 @@ module spi_master_cs #(
     .o_mosi(o_mosi)
   );
 
-
   // Purpose: Control CS line using State Machine
-  always @(posedge i_clk or negedge i_rst)
-  begin
-    if (~i_rst)
-    begin
+  always @(posedge i_clk or negedge i_rst) begin
+    if (~i_rst) begin
       r_SM_CS <= IDLE;
       r_CS_n  <= 1'b1;   // Resets to high
       r_CS_Inactive_Count <= CS_INACTIVE_CLKS;
-    end
-    else
-    begin
-
+    end else begin
       case (r_SM_CS)      
-      IDLE:
-        begin
-          if (r_CS_n & i_start) // Start of transmission
-          begin
-            r_CS_n     <= 1'b0;       // Drive CS low
-            r_SM_CS    <= TRANSFER;   // Transfer bytes
-          end
+      IDLE: 
+      begin
+        if (r_CS_n & i_start) begin // Start of transmission
+          r_CS_n  <= 1'b0;       // Drive CS low
+          r_SM_CS <= TRANSFER;   // Transfer bytes
         end
-
-      TRANSFER:
-        begin
-          // Wait until SPI is done transferring do next thing
-          if (w_Master_Ready)
-          begin
-              r_CS_n  <= 1'b1; // we done, so set CS high
-              r_CS_Inactive_Count <= CS_INACTIVE_CLKS;
-              r_SM_CS             <= CS_INACTIVE;
-          end // if (w_Master_Ready)
-        end // case: TRANSFER
+      end 
+      TRANSFER: 
+      begin
+        // Wait until SPI is done transferring do next thing
+        if (w_Master_Ready) begin
+            r_CS_n  <= 1'b1; // we done, so set CS high
+            r_CS_Inactive_Count <= CS_INACTIVE_CLKS;
+            r_SM_CS             <= CS_INACTIVE;
+        end // if (w_Master_Ready)
+      end // case: TRANSFER
 
       CS_INACTIVE:
-        begin
-          if (r_CS_Inactive_Count > 0)
-          begin
-            r_CS_Inactive_Count <= r_CS_Inactive_Count - 1'b1;
-          end
-          else
-          begin
-            r_SM_CS <= IDLE;
-          end
+      begin
+        if (r_CS_Inactive_Count > 0) begin
+          r_CS_Inactive_Count <= r_CS_Inactive_Count - 1'b1;
+        end else begin
+          r_SM_CS <= IDLE;
         end
+      end
 
       default:
         begin
@@ -147,7 +135,8 @@ module spi_master_cs #(
 
   assign o_cs = r_CS_n;
 
-  assign o_done  = ((r_SM_CS == IDLE) | (r_SM_CS == TRANSFER && w_Master_Ready == 1'b1)) & ~i_start;
+  //assign o_done  = ((r_SM_CS == IDLE) | (r_SM_CS == TRANSFER && w_Master_Ready == 1'b1)) & ~i_start;
+  assign o_done  = (r_SM_CS == IDLE) & ~i_start;
 
 endmodule // SPI_Master_With_Single_CS
 
