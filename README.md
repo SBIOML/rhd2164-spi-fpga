@@ -22,9 +22,9 @@ In Xilinx PS-PL applications, AXI can be used to bridge the PS and the PL by mem
 
 ## HDL development setup
 
-Personally, I'd recommend developing the HDL code and testbench in a nice IDE like VS Code. Custom HDL sources are located in `source/`.
+Personally, I'd recommend developing the HDL code and testbench in a nice IDE like VS Code. Custom HDL sources are located in `hdl/`.
 
-This project uses the [cocotb](https://docs.cocotb.org/en/stable/) Python library to write the testbench, which is located under `sim/`. Refer to cocotb's documentation to know how to set it up and use it.
+This project uses the [cocotb](https://docs.cocotb.org/en/stable/) Python library to write the testbench, which is located under `sim/`. Refer to cocotb's documentation to know how to set it up and use it. The current `Makefile` uses [Icarus Verilog](https://github.com/steveicarus/iverilog) as simulator.
 
 ## Xilinx development setup
 

@@ -3,7 +3,6 @@ from cocotb.clock import Clock
 import cocotb.triggers
 from cocotb.triggers import RisingEdge, Timer, FallingEdge
 from cocotb.types import LogicArray
-
 import random
 
 async def init_dut(dut):
@@ -65,7 +64,6 @@ async def transfer_rx_done(dut):
     result = await cocotb.triggers.First(Timer(50, units='us'), RisingEdge(dut.o_rx_done))
     assert type(result) != Timer
 
-
 @cocotb.test()
 async def write_spi(dut):
     await init_dut(dut)
@@ -83,7 +81,7 @@ async def write_spi(dut):
         #for i in range(20):
         #    await RisingEdge(dut.o_done.value)
         #    print(f"DONE value: {dut.o_done.value}")
-        print(f"{i}: Expected {hex(val)}, MOSI sent {hex(sent)}")
+        #print(f"{i}: Expected {hex(val)}, MOSI sent {hex(sent)}")
         assert sent == val
 
 @cocotb.test()
