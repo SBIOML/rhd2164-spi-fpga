@@ -60,8 +60,8 @@ module spi_master_cs #(
   localparam TRANSFER    = 2'b01;
   localparam CS_INACTIVE = 2'b10;
 
-  reg [15:0] r_dout_a;
-  reg [15:0] r_dout_b;
+  wire [15:0] r_dout_a;
+  wire [15:0] r_dout_b;
 
   reg [1:0] r_SM_CS;
   reg r_CS_n;
@@ -97,6 +97,8 @@ module spi_master_cs #(
       r_SM_CS <= IDLE;
       r_CS_n  <= 1'b1;   // Resets to high
       r_CS_Inactive_Count <= CS_INACTIVE_CLKS;
+      o_dout_a <= 0;
+      o_dout_b <= 0;
     end else begin
       case (r_SM_CS)      
       IDLE: 

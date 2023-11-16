@@ -44,8 +44,8 @@ module spi_master #(
   output reg   o_done,   // Transmit Ready for next byte
 
   // RX (MISO) Signals
-  output [15:0] o_dout_a,    // Byte received on MISOA
-  output [15:0] o_dout_b,    // Byte received on MISOB
+  output reg [15:0] o_dout_a, // Byte received on MISOA
+  output reg [15:0] o_dout_b, // Byte received on MISOB
 
   // SPI Interface
   output reg o_sclk,
@@ -53,13 +53,13 @@ module spi_master #(
   output reg o_mosi
 );
 
-  reg [$clog2(CLKS_PER_HALF_BIT*2)-1:0] r_SPI_Clk_Count;
+  reg [$clog2(CLKS_PER_HALF_BIT*2)-1:0] r_sclk_cnt;
   reg r_sclk;
-  reg [5:0] r_SPI_Clk_Edges; // 32d
-  reg r_Leading_Edge;
-  reg r_Trailing_Edge;
-  reg        r_TX_DV;
-  reg [15:0] r_TX_Byte;
+  reg [5:0] r_sclk_edges; // 32 clock edges / transfer
+  reg r_sclk_rising;
+  reg r_sclk_falling;
+  reg        r_start;
+  reg [15:0] r_tx;
 
   reg r_dout_sel;
 
@@ -78,34 +78,34 @@ module spi_master #(
   always @(posedge i_clk or negedge i_rst) begin
     if (~i_rst) begin
       o_done <= 1'b0;
-      r_SPI_Clk_Edges <= 0;
-      r_Leading_Edge  <= 1'b0;
-      r_Trailing_Edge <= 1'b0;
+      r_sclk_edges <= 0;
+      r_sclk_rising  <= 1'b0;
+      r_sclk_falling <= 1'b0;
       r_sclk <= 0; // assign default state to idle state
-      r_SPI_Clk_Count <= 0;
+      r_sclk_cnt <= 0;
     end else begin
-      r_Leading_Edge  <= 1'b0;
-      r_Trailing_Edge <= 1'b0;
+      r_sclk_rising  <= 1'b0;
+      r_sclk_falling <= 1'b0;
       
       if (i_start) begin
         o_done <= 1'b0;
-        r_SPI_Clk_Edges <= 6'd32;  // # edges in one byte = 16, but we send 2 kek
-      end else if (r_SPI_Clk_Edges > 0) begin
+        r_sclk_edges <= 6'd32;  // # edges in one byte = 16, but we send 2 kek
+      end else if (r_sclk_edges > 0) begin
         o_done <= 1'b0;
-        if (r_SPI_Clk_Count == CLKS_PER_HALF_BIT*2-1) begin
+        if (r_sclk_cnt == CLKS_PER_HALF_BIT*2-1) begin
           // time = full-bit, falling edge sclk + shift
-          r_SPI_Clk_Edges <= r_SPI_Clk_Edges - 1'b1;
-          r_Trailing_Edge <= 1'b1;
-          r_SPI_Clk_Count <= 0;
+          r_sclk_edges <= r_sclk_edges - 1'b1;
+          r_sclk_falling <= 1'b1;
+          r_sclk_cnt <= 0;
           r_sclk <= 0;
-        end else if (r_SPI_Clk_Count == CLKS_PER_HALF_BIT-1) begin
+        end else if (r_sclk_cnt == CLKS_PER_HALF_BIT-1) begin
           // time = half-bit, rising edge sclk + sampling
-          r_SPI_Clk_Edges <= r_SPI_Clk_Edges - 1'b1;
-          r_Leading_Edge  <= 1'b1;
-          r_SPI_Clk_Count <= r_SPI_Clk_Count + 1'b1;
+          r_sclk_edges <= r_sclk_edges - 1'b1;
+          r_sclk_rising  <= 1'b1;
+          r_sclk_cnt <= r_sclk_cnt + 1'b1;
           r_sclk <= 1'b1;
         end else begin
-          r_SPI_Clk_Count <= r_SPI_Clk_Count + 1'b1;
+          r_sclk_cnt <= r_sclk_cnt + 1'b1;
         end
       end else begin
         o_done <= 1'b1;
@@ -118,14 +118,20 @@ module spi_master #(
   // Keeps local storage of byte in case higher level module changes the data
   always @(posedge i_clk or negedge i_rst) begin
     if (~i_rst) begin
-      r_TX_Byte <= 16'd0;
-      r_TX_DV   <= 1'b0;
+      r_tx <= 16'd0;
+      r_start   <= 1'b0;
       r_dout_sel <= 0; // Mode0
+      o_dout_a <= 0;
+      o_dout_b <= 0;
     end else begin
-      r_TX_DV <= i_start; // 1 clock cycle delay
+      r_start <= i_start; // 1 clock cycle delay
       if (i_start) begin
-        r_TX_Byte <= i_din;
+        r_tx <= i_din;
         r_dout_sel <= i_din[15:14] == 2'b0 ? 1'b1 : 1'b0;
+      end else if (o_done) begin
+        // Output Mux
+          o_dout_a <= r_dout_sel == 0 ? r_rx : r_rx_a;
+          o_dout_b <= r_dout_sel == 0 ? 16'b0 : r_rx_b;
       end
     end // else: !if(~i_rst)
   end // always @ (posedge i_clk or negedge i_rst)
@@ -140,12 +146,12 @@ module spi_master #(
     end else begin
       if (o_done) begin
         r_tx_cnt <= 4'd15;
-      end else if (r_TX_DV) begin 
+      end else if (r_start) begin 
         // CPHA = 0 first bit (shift before first sclk edge)
-        o_mosi <= r_TX_Byte[4'd15];
+        o_mosi <= r_tx[4'd15];
         r_tx_cnt <= 4'd14;
-      end else if (r_Trailing_Edge) begin
-        o_mosi <= r_TX_Byte[r_tx_cnt];
+      end else if (r_sclk_falling) begin
+        o_mosi <= r_tx[r_tx_cnt];
         r_tx_cnt <= r_tx_cnt - 1'b1;
       end
     end
@@ -161,7 +167,7 @@ module spi_master #(
       // Default Assignments
       if (o_done) begin // Check if ready is high, if so reset bit count to default
         r_rx_cnt <= 4'd15;
-      end else if (r_Leading_Edge) begin
+      end else if (r_sclk_rising) begin
         r_rx[r_rx_cnt] <= i_miso;  // Sample data
         r_rx_cnt <= r_rx_cnt - 1'b1;
       end
@@ -182,7 +188,7 @@ module spi_master #(
         r_ddr_rx_cnt_a <= 4'd15;
         r_ddr_rx_cnt_b <= 5'd16;
       end else begin
-        if (r_Leading_Edge) begin
+        if (r_sclk_rising) begin
           // rising edge == miso B
           r_ddr_rx_cnt_b <= r_ddr_rx_cnt_b - 1'b1;
           if (r_ddr_rx_cnt_b == 5'd16) begin
@@ -190,7 +196,7 @@ module spi_master #(
           end else begin
             r_rx_b[r_ddr_rx_cnt_b] <= i_miso;  // Sample data
           end
-        end else if (r_Trailing_Edge) begin
+        end else if (r_sclk_falling) begin
           // falling edge == miso A
           r_rx_a[r_ddr_rx_cnt_a] <= i_miso;  // Sample data
           r_ddr_rx_cnt_a <= r_ddr_rx_cnt_a - 1'b1;
@@ -207,9 +213,6 @@ module spi_master #(
       o_sclk <= r_sclk;
     end // else: !if(~i_rst)
   end // always @ (posedge i_clk or negedge i_rst)
-  
-  // Output Mux
-  assign o_dout_a = r_dout_sel == 0 ? r_rx : r_rx_a;
-  assign o_dout_b = r_dout_sel == 0 ? 16'b0 : r_rx_b;
+ 
 
 endmodule // SPI_Master
