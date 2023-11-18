@@ -81,7 +81,7 @@ module spi_master #(
       r_sclk_edges <= 0;
       r_sclk_rising  <= 1'b0;
       r_sclk_falling <= 1'b0;
-      r_sclk <= 0; // assign default state to idle state
+      r_sclk <= 1'b0; // assign default state to idle state
       r_sclk_cnt <= 0;
     end else begin
       r_sclk_rising  <= 1'b0;
@@ -97,7 +97,7 @@ module spi_master #(
           r_sclk_edges <= r_sclk_edges - 1'b1;
           r_sclk_falling <= 1'b1;
           r_sclk_cnt <= 0;
-          r_sclk <= 0;
+          r_sclk <= 1'b0;
         end else if (r_sclk_cnt == CLKS_PER_HALF_BIT-1) begin
           // time = half-bit, rising edge sclk + sampling
           r_sclk_edges <= r_sclk_edges - 1'b1;
