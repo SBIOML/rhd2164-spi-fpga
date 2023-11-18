@@ -34,6 +34,7 @@
 
 module spi_master_cs #(
   parameter CLKS_PER_HALF_BIT = 4,
+  parameter CLKS_WAIT_AFTER_DONE = 4, // min 20.8 ns
   parameter CS_INACTIVE_CLKS = 20 // min 154 ns
 ) (
   // Control/Data Signals,
@@ -70,7 +71,8 @@ module spi_master_cs #(
 
   // Instantiate Master
   spi_master #(
-    .CLKS_PER_HALF_BIT(CLKS_PER_HALF_BIT)
+    .CLKS_PER_HALF_BIT(CLKS_PER_HALF_BIT),
+    .CLKS_WAIT_AFTER_DONE(CLKS_WAIT_AFTER_DONE)
   ) spi_master_inst (
     // Control/Data Signals,
     .i_rst(i_rst), // FPGA Reset
@@ -97,8 +99,8 @@ module spi_master_cs #(
       r_SM_CS <= IDLE;
       r_CS_n  <= 1'b1;   // Resets to high
       r_CS_Inactive_Count <= CS_INACTIVE_CLKS;
-      o_dout_a <= 0;
-      o_dout_b <= 0;
+      o_dout_a <= 16'b0;
+      o_dout_b <= 16'b0;
     end else begin
       case (r_SM_CS)      
       IDLE: 
@@ -113,6 +115,8 @@ module spi_master_cs #(
         // Wait until SPI is done transferring do next thing
         if (w_Master_Ready) begin
             r_CS_n  <= 1'b1; // we done, so set CS high
+            o_dout_a <= r_dout_a;
+            o_dout_b <= {r_dout_b[15:1], i_miso};  // Sample MISOB on rising edge
             r_CS_Inactive_Count <= CS_INACTIVE_CLKS;
             r_SM_CS             <= CS_INACTIVE;
         end // if (w_Master_Ready)
@@ -121,11 +125,7 @@ module spi_master_cs #(
       CS_INACTIVE:
       begin
         r_CS_Inactive_Count <= r_CS_Inactive_Count - 1'b1;
-        if (r_CS_Inactive_Count == CS_INACTIVE_CLKS) begin
-          // Sample MISOB on rising edge
-          o_dout_a <= r_dout_a;
-          o_dout_b <= {r_dout_b[15:1], i_miso};
-        end else if (r_CS_Inactive_Count == 0) begin
+        if (r_CS_Inactive_Count == 0) begin
           r_SM_CS <= IDLE;
         end
       end
@@ -140,7 +140,7 @@ module spi_master_cs #(
   end // always @ (posedge i_clk or negedge i_rst)
 
   assign o_cs = r_CS_n;
-  assign o_done  = (r_SM_CS == IDLE) & ~i_start;
+  assign o_done = (r_SM_CS == IDLE) & ~i_start;
 
 endmodule // SPI_Master_With_Single_CS
 

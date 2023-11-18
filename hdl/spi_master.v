@@ -32,11 +32,12 @@
 `timescale 1us/1ns
 
 module spi_master #(
-  parameter CLKS_PER_HALF_BIT = 4
+  parameter CLKS_PER_HALF_BIT = 4,
+  parameter CLKS_WAIT_AFTER_DONE = 4
 ) (
   // Control/Data Signals,
-  input i_rst,     // FPGA Reset
-  input i_clk,     // FPGA Clock
+  input i_rst, // FPGA Reset
+  input i_clk, // FPGA Clock
 
   // TX (MOSI) Signals
   input [15:0] i_din,    // Byte to transmit on MOSI
@@ -54,6 +55,9 @@ module spi_master #(
 );
 
   reg [$clog2(CLKS_PER_HALF_BIT*2)-1:0] r_sclk_cnt;
+  reg [$clog2(CLKS_WAIT_AFTER_DONE)-1:0] r_wait_cnt;
+  
+  reg r_done; // Transfer done, waiting for CLKS_WAIT_AFTER_DONE
   reg r_sclk;
   reg [5:0] r_sclk_edges; // 32 clock edges / transfer
   reg r_sclk_rising;
@@ -61,12 +65,7 @@ module spi_master #(
   reg        r_start;
   reg [15:0] r_tx;
 
-  reg r_dout_sel;
-
   reg [3:0] r_tx_cnt;
-
-  reg [15:0] r_rx; // Mode 0 sampler
-  reg [3:0] r_rx_cnt; // 16d counter
 
   reg [15:0] r_rx_a; // DDR sampler ch A
   reg [15:0] r_rx_b; // DDR sampler ch B
@@ -78,20 +77,25 @@ module spi_master #(
   always @(posedge i_clk or negedge i_rst) begin
     if (~i_rst) begin
       o_done <= 1'b0;
+      r_done <= 1'b0;
       r_sclk_edges <= 0;
       r_sclk_rising  <= 1'b0;
       r_sclk_falling <= 1'b0;
-      r_sclk <= 1'b0; // assign default state to idle state
+      r_sclk <= 1'b0; // default state to sclk
       r_sclk_cnt <= 0;
+      r_wait_cnt <= CLKS_WAIT_AFTER_DONE-1;
     end else begin
       r_sclk_rising  <= 1'b0;
       r_sclk_falling <= 1'b0;
       
       if (i_start) begin
+        r_done <= 1'b0;
         o_done <= 1'b0;
         r_sclk_edges <= 6'd32;  // # edges in one byte = 16, but we send 2 kek
+        r_wait_cnt <= CLKS_WAIT_AFTER_DONE-1;
       end else if (r_sclk_edges > 0) begin
         o_done <= 1'b0;
+        r_done <= 1'b0;
         if (r_sclk_cnt == CLKS_PER_HALF_BIT*2-1) begin
           // time = full-bit, falling edge sclk + shift
           r_sclk_edges <= r_sclk_edges - 1'b1;
@@ -108,7 +112,12 @@ module spi_master #(
           r_sclk_cnt <= r_sclk_cnt + 1'b1;
         end
       end else begin
-        o_done <= 1'b1;
+        r_done <= 1'b1;
+        if (r_wait_cnt == 0) begin
+            o_done <= 1'b1;
+        end  else begin
+            r_wait_cnt <= r_wait_cnt-1;
+        end
       end 
     end // else: !if(~i_rst)
   end // always @ (posedge i_clk or negedge i_rst)
@@ -119,19 +128,11 @@ module spi_master #(
   always @(posedge i_clk or negedge i_rst) begin
     if (~i_rst) begin
       r_tx <= 16'd0;
-      r_start   <= 1'b0;
-      r_dout_sel <= 0; // Mode0
-      o_dout_a <= 0;
-      o_dout_b <= 0;
+      r_start <= 1'b0;
     end else begin
       r_start <= i_start; // 1 clock cycle delay
       if (i_start) begin
         r_tx <= i_din;
-        r_dout_sel <= i_din[15:14] == 2'b0 ? 1'b1 : 1'b0;
-      end else if (o_done) begin
-        // Output Mux
-          o_dout_a <= r_dout_sel == 0 ? r_rx : r_rx_a;
-          o_dout_b <= r_dout_sel == 0 ? 16'b0 : r_rx_b;
       end
     end // else: !if(~i_rst)
   end // always @ (posedge i_clk or negedge i_rst)
@@ -144,7 +145,7 @@ module spi_master #(
       o_mosi <= 1'b0;
       r_tx_cnt <= 4'd15;
     end else begin
-      if (o_done) begin
+      if (r_done) begin
         r_tx_cnt <= 4'd15;
       end else if (r_start) begin 
         // CPHA = 0 first bit (shift before first sclk edge)
@@ -156,24 +157,6 @@ module spi_master #(
       end
     end
   end
-
-
-  // Read MISO in normal mode
-  always @(posedge i_clk or negedge i_rst) begin
-    if (~i_rst) begin
-      r_rx <= 16'd0;
-      r_rx_cnt <= 4'd15;
-    end else begin
-      // Default Assignments
-      if (o_done) begin // Check if ready is high, if so reset bit count to default
-        r_rx_cnt <= 4'd15;
-      end else if (r_sclk_rising) begin
-        r_rx[r_rx_cnt] <= i_miso;  // Sample data
-        r_rx_cnt <= r_rx_cnt - 1'b1;
-      end
-    end
-  end
-  
   
   // Read MISO in DDR mode
   always @(posedge i_clk or negedge i_rst) begin
@@ -182,18 +165,21 @@ module spi_master #(
       r_rx_b <= 0;
       r_ddr_rx_cnt_a <= 4'd15;
       r_ddr_rx_cnt_b <= 5'd16;
+      o_dout_a <= 0;
+      o_dout_b <= 0;
     end else begin
       // Default Assignments
-      if (o_done) begin // Check if ready is high, if so reset bit count to default
+      if (r_done) begin
         r_ddr_rx_cnt_a <= 4'd15;
         r_ddr_rx_cnt_b <= 5'd16;
+        o_dout_a <= r_rx_a;
+        o_dout_b <= r_rx_b;
       end else begin
         if (r_sclk_rising) begin
           // rising edge == miso B
           r_ddr_rx_cnt_b <= r_ddr_rx_cnt_b - 1'b1;
-          if (r_ddr_rx_cnt_b == 5'd16) begin
-            // skip first rising edge
-          end else begin
+          // Skip first sclk edge
+          if (r_ddr_rx_cnt_b < 5'd16) begin 
             r_rx_b[r_ddr_rx_cnt_b] <= i_miso;  // Sample data
           end
         end else if (r_sclk_falling) begin

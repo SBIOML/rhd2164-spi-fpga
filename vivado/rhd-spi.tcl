@@ -767,7 +767,7 @@ gpio[0]#qspi0_ss_b#qspi0_io[0]#qspi0_io[1]#qspi0_io[2]#qspi0_io[3]/HOLD_B#qspi0_
      return 1
    }
     set_property -dict [ list \
-   CONFIG.CLKS_PER_HALF_BIT {16} \
+   CONFIG.CLKS_PER_HALF_BIT {5} \
  ] $spi_master_cs_0
 
   # Create interface connections

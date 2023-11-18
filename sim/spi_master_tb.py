@@ -56,23 +56,6 @@ async def transfer_done(dut):
     result = await cocotb.triggers.First(Timer(50, units='us'), RisingEdge(dut.o_done))
     assert type(result) != Timer
 
-#@cocotb.test()
-async def transfer_rx_done(dut):
-    await init_dut(dut)
-    await start_transfer(dut, 0x0000)
-    assert dut.o_rx_done.value == 0
-    result = await cocotb.triggers.First(Timer(50, units='us'), RisingEdge(dut.o_rx_done))
-    assert type(result) != Timer
-
-@cocotb.test()
-async def spi_dout_mux(dut):
-    await init_dut(dut)
-    await start_transfer(dut, 0x0000)
-    assert dut.spi_master_inst.r_dout_sel.value == 1
-    await init_dut(dut)
-    await start_transfer(dut, 0x7000) # non-convert command
-    assert dut.spi_master_inst.r_dout_sel.value == 0
-
 @cocotb.test()
 async def write_spi(dut):
     await init_dut(dut)
@@ -92,17 +75,6 @@ async def write_spi(dut):
         assert sent == val
 
 @cocotb.test()
-async def read_spi_mode0(dut):
-    await init_dut(dut)
-    for i in range(10):
-        # Make sure bits [15:14] are not both 0
-        val = (random.randint(1,3)<<14) | random.randint(0, 0xFFFF)
-        await start_transfer(dut, 0)
-        await miso_sim(dut, val)
-        dut._log.info(f"{i}: Expected {hex(val)}, o_dout {hex(dut.o_dout_a.value)}")
-        assert dut.o_dout_a.value == val
-
-@cocotb.test()
 async def read_spi_ddr(dut):
     await init_dut(dut)
     for i in range(10):
@@ -111,7 +83,6 @@ async def read_spi_ddr(dut):
         b16 = random.randint(0,1) # Dummy value
 
         await start_transfer(dut, 0x0000)
-        assert dut.spi_master_inst.r_dout_sel.value == 1
         dut.i_miso.value = b16
         for s in range(16):
             await RisingEdge(dut.i_clk)
@@ -121,9 +92,9 @@ async def read_spi_ddr(dut):
             await FallingEdge(dut.o_sclk)
             dut.i_miso.value = (b >> (15-s)) & 1
         # Sample on CS rising edge
-        await RisingEdge(dut.o_cs)
-        await RisingEdge(dut.i_clk)
         await RisingEdge(dut.o_done)
+
+        # Sample on CS rising edge
         rx_a = dut.o_dout_a.value
         rx_b = dut.o_dout_b.value
 
