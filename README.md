@@ -71,7 +71,9 @@ Some more varied and advanced Vitis tutorials are available on Xilinx's [Vitis-T
 
 A working barebones demo is located at `vitis/main.c`. To use it, just create a `Hello World` application in Vitis, and copy-paste the contents of `main.c` into the newly created main file. The payload starts at `0x0000` and increments by 1 after every packet.
 
-## [TODO] PYNQ development setup
+## PYNQ
+
+The AXI GPIO driver is compatible with PYNQ. The setup is a bit more complicated, so refer to [PYNQ's README](pynq/README.md).
 
 ## References
 
