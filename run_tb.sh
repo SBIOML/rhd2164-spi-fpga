@@ -1,0 +1,1 @@
+cd tests;make SIM=icarus WAVES=1; cd ..
