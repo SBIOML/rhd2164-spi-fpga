@@ -31,13 +31,14 @@
 ///////////////////////////////////////////////////////////////////////////////
 `timescale 1us/1ns
 
-module spi_master #(
-  parameter CLKS_PER_HALF_BIT = 4,
-  parameter CLKS_WAIT_AFTER_DONE = 4
-) (
+module spi_master (
   // Control/Data Signals,
   input i_rst, // FPGA Reset
   input i_clk, // FPGA Clock
+
+  // Control registers
+  input [15:0] i_clk_div,
+  input [7:0]  i_clks_wait_after_done,
 
   // TX (MOSI) Signals
   input [15:0] i_din,    // Byte to transmit on MOSI
@@ -54,14 +55,16 @@ module spi_master #(
   output reg o_mosi
 );
 
-  reg [$clog2(CLKS_PER_HALF_BIT*2)-1:0] r_sclk_cnt;
-  reg [$clog2(CLKS_WAIT_AFTER_DONE)-1:0] r_wait_cnt;
-  
+  reg [15:0] r_sclk_cnt;
+  reg [7:0]  r_wait_cnt;
+
+
   reg r_done; // Transfer done, waiting for CLKS_WAIT_AFTER_DONE
   reg r_sclk;
   reg [5:0] r_sclk_edges; // 32 clock edges / transfer
   reg r_sclk_rising;
   reg r_sclk_falling;
+
   reg        r_start;
   reg [15:0] r_tx;
 
@@ -83,7 +86,7 @@ module spi_master #(
       r_sclk_falling <= 1'b0;
       r_sclk <= 1'b0; // default state to sclk
       r_sclk_cnt <= 0;
-      r_wait_cnt <= CLKS_WAIT_AFTER_DONE-1;
+      r_wait_cnt <= i_clks_wait_after_done;
     end else begin
       r_sclk_rising  <= 1'b0;
       r_sclk_falling <= 1'b0;
@@ -92,17 +95,17 @@ module spi_master #(
         r_done <= 1'b0;
         o_done <= 1'b0;
         r_sclk_edges <= 6'd32;  // # edges in one byte = 16, but we send 2 kek
-        r_wait_cnt <= CLKS_WAIT_AFTER_DONE-1;
+        r_wait_cnt <= i_clks_wait_after_done;
       end else if (r_sclk_edges > 0) begin
         o_done <= 1'b0;
         r_done <= 1'b0;
-        if (r_sclk_cnt == CLKS_PER_HALF_BIT*2-1) begin
+        if (r_sclk_cnt == i_clk_div*2-1) begin
           // time = full-bit, falling edge sclk + shift
           r_sclk_edges <= r_sclk_edges - 1'b1;
           r_sclk_falling <= 1'b1;
           r_sclk_cnt <= 0;
           r_sclk <= 1'b0;
-        end else if (r_sclk_cnt == CLKS_PER_HALF_BIT-1) begin
+        end else if (r_sclk_cnt == i_clk_div-1) begin
           // time = half-bit, rising edge sclk + sampling
           r_sclk_edges <= r_sclk_edges - 1'b1;
           r_sclk_rising  <= 1'b1;
@@ -175,6 +178,7 @@ module spi_master #(
         o_dout_a <= r_rx_a;
         o_dout_b <= r_rx_b;
       end else begin
+      
         if (r_sclk_rising) begin
           // rising edge == miso B
           r_ddr_rx_cnt_b <= r_ddr_rx_cnt_b - 1'b1;
@@ -193,11 +197,11 @@ module spi_master #(
 
   // Purpose: Add clock delay to signals for alignment.
   always @(posedge i_clk or negedge i_rst) begin
-    if (~i_rst) begin
+    if (~i_rst)
       o_sclk  <= 0;
-    end else begin
+    else
       o_sclk <= r_sclk;
-    end // else: !if(~i_rst)
+    // else: !if(~i_rst)
   end // always @ (posedge i_clk or negedge i_rst)
  
 

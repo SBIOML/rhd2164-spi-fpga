@@ -32,14 +32,14 @@
 //              time when CS is high between trasnfers.
 ///////////////////////////////////////////////////////////////////////////////
 
-module spi_master_cs #(
-  parameter CLKS_PER_HALF_BIT = 4,
-  parameter CLKS_WAIT_AFTER_DONE = 4, // min 20.8 ns
-  parameter CS_INACTIVE_CLKS = 20 // min 154 ns
-) (
+module spi_master_cs (
   // Control/Data Signals,
   input i_rst,     // FPGA Reset
   input i_clk,     // FPGA Clock
+
+  // Control registers
+  input [15:0] i_clk_div,
+  input [7:0] i_clks_wait_after_done,
 
   // TX (MOSI) Signals
   input [15:0]  i_din,    // Byte to transmit on MOSI
@@ -64,24 +64,25 @@ module spi_master_cs #(
   wire [15:0] r_dout_a;
   wire [15:0] r_dout_b;
 
-  reg [1:0] r_SM_CS;
-  reg r_CS_n;
-  reg [$clog2(CS_INACTIVE_CLKS):0] r_CS_Inactive_Count;
-  wire w_Master_Ready;
+  reg [1:0] r_sm_cs;
+  reg r_csn;
+  reg [7:0] r_cs_inactive_cnt;
+  wire w_master_ready;
 
   // Instantiate Master
-  spi_master #(
-    .CLKS_PER_HALF_BIT(CLKS_PER_HALF_BIT),
-    .CLKS_WAIT_AFTER_DONE(CLKS_WAIT_AFTER_DONE)
-  ) spi_master_inst (
+  spi_master spi_master_inst (
     // Control/Data Signals,
     .i_rst(i_rst), // FPGA Reset
     .i_clk(i_clk), // FPGA Clock
 
+    // Control registers
+    .i_clks_wait_after_done(i_clks_wait_after_done),
+    .i_clk_div(i_clk_div),
+
     // TX (MOSI) Signals
     .i_din(i_din),          // Byte to transmit
     .i_start(i_start),      // Data Valid Pulse 
-    .o_done(w_Master_Ready),// Transmit Ready for Byte
+    .o_done(w_master_ready),// Transmit Ready for Byte
 
     // RX (MISO) Signals
     .o_dout_a(r_dout_a), // Byte received on MISO
@@ -96,51 +97,51 @@ module spi_master_cs #(
   // Purpose: Control CS line using State Machine
   always @(posedge i_clk or negedge i_rst) begin
     if (~i_rst) begin
-      r_SM_CS <= IDLE;
-      r_CS_n  <= 1'b1;   // Resets to high
-      r_CS_Inactive_Count <= CS_INACTIVE_CLKS;
+      r_sm_cs <= IDLE;
+      r_csn  <= 1'b1;   // Resets to high
+      r_cs_inactive_cnt <= i_clks_wait_after_done;
       o_dout_a <= 16'b0;
       o_dout_b <= 16'b0;
     end else begin
-      case (r_SM_CS)      
+      case (r_sm_cs)      
       IDLE: 
       begin
-        if (r_CS_n & i_start) begin // Start of transmission
-          r_CS_n  <= 1'b0;       // Drive CS low
-          r_SM_CS <= TRANSFER;   // Transfer bytes
+        if (r_csn & i_start) begin // Start of transmission
+          r_csn  <= 1'b0;       // Drive CS low
+          r_sm_cs <= TRANSFER;   // Transfer bytes
         end
       end 
       TRANSFER: 
       begin
         // Wait until SPI is done transferring do next thing
-        if (w_Master_Ready) begin
-            r_CS_n  <= 1'b1; // we done, so set CS high
+        if (w_master_ready) begin
+            r_csn  <= 1'b1; // we done, so set CS high
             o_dout_a <= r_dout_a;
             o_dout_b <= {r_dout_b[15:1], i_miso};  // Sample MISOB on rising edge
-            r_CS_Inactive_Count <= CS_INACTIVE_CLKS;
-            r_SM_CS             <= CS_INACTIVE;
-        end // if (w_Master_Ready)
+            r_cs_inactive_cnt <= i_clks_wait_after_done;
+            r_sm_cs <= CS_INACTIVE;
+        end // if (w_master_ready)
       end // case: TRANSFER
 
       CS_INACTIVE:
       begin
-        r_CS_Inactive_Count <= r_CS_Inactive_Count - 1'b1;
-        if (r_CS_Inactive_Count == 0) begin
-          r_SM_CS <= IDLE;
+        r_cs_inactive_cnt <= r_cs_inactive_cnt - 1'b1;
+        if (r_cs_inactive_cnt == 0) begin
+          r_sm_cs <= IDLE;
         end
       end
 
       default:
         begin
-          r_CS_n  <= 1'b1; // we done, so set CS high
-          r_SM_CS <= IDLE;
+          r_csn  <= 1'b1; // we done, so set CS high
+          r_sm_cs <= IDLE;
         end
-      endcase // case (r_SM_CS)
+      endcase // case (r_sm_cs)
     end
   end // always @ (posedge i_clk or negedge i_rst)
 
-  assign o_cs = r_CS_n;
-  assign o_done = (r_SM_CS == IDLE) & ~i_start;
+  assign o_cs = r_csn;
+  assign o_done = (r_sm_cs == IDLE) & ~i_start;
 
 endmodule // SPI_Master_With_Single_CS
 
