@@ -68,11 +68,22 @@ async def clock_divider(dut):
 
         dut.i_clk_div.value = d
         await start_transfer(dut, 0x0000)
-        await Edge(dut.o_sclk)  # Wait for rising edge
-        for _ in range(dut.i_clk_div.value + 1):
+        await RisingEdge(dut.o_sclk)  # realign
+
+        for k in range(dut.i_clk_div.value + 1):
             await RisingEdge(dut.i_clk)
-            # print(dut.o_sclk.value)
-        assert dut.o_sclk.value == 0
+            if dut.o_sclk.value == 0:
+                # falling edge after d cycles
+                assert k == d
+
+        # Verify rising edge
+        await FallingEdge(dut.o_sclk)
+
+        for k in range(dut.i_clk_div.value + 1):
+            await RisingEdge(dut.i_clk)
+            if dut.o_sclk.value == 1:
+                # rising edge after d cycles
+                assert k == d
 
 
 @cocotb.test()
